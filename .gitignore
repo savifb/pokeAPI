@@ -1,0 +1,8 @@
+# Variáveis de Ambiente #
+.env
+.dockerignore
+# Logs #
+logs
+*.log
+.pycache
+__pycache__
