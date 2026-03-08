@@ -119,7 +119,56 @@ async def get_pokemon(db:AsyncSession, pokemon_id:int) -> dict|None:
     await set_cache(f'Pokemon:{pokemon_id}', dados)
     
     return dados 
+
+async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str) -> dict:
+    cache_key = f"pokemons: {limit}:{offset}"
     
+    cache = await get_cache(cache_key)
+    
+    if cache:
+        return cache
+    
+    total = await db.scalar(func.count()).select_from(Pokemon)
+    
+    if total > 0:
+        resultado = await db.execute(
+            select(Pokemon).order_by(id).limit(limit).offset(offset)
+        )
+        pokemons = resultado.scalarars().all()
+    
+        dados = [estrutura_no_banco[p] for p in pokemons]
+    
+    else:
+        dados = []
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{POKE_API_url}/pokemon",
+                params={"limit": limit, "offset": offset}
+            )
+            response.raise_for_status()
+            resultados = response.json()["results"]
+            total = response.json()["count"]
+
+            for item in resultados:
+                detalhe = await client.get(item["url"])
+                detalhe.raise_for_status()
+                pokemon_formatado = estrutura_dados_daAPI(detalhe.json())
+                await salvar_no_banco(db, pokemon_formatado)
+                dados.append(pokemon_formatado)
+
+    resposta = {
+        "data": dados,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "next": f"{base_url}?limit={limit}&offset={offset + limit}"
+                if offset + limit < total else None,
+        "previous": f"{base_url}?limit={limit}&offset={offset - limit}"
+                    if offset > 0 else None,
+    }
+
+    await set_cache(cache_key, resposta)
+    return resposta
         
     
 
