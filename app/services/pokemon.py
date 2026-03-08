@@ -123,38 +123,44 @@ async def get_pokemon(db:AsyncSession, pokemon_id:int) -> dict|None:
 async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str) -> dict:
     cache_key = f"pokemons: {limit}:{offset}"
     
-    cache = await get_cache(cache_key)
+    cache = await get_cache(cache_key) #pegar o cache cm base no limite por página e posição
     
     if cache:
         return cache
     
     total = await db.scalar(func.count()).select_from(Pokemon)
     
-    if total > 0:
+    if total > 0: # se tiver pokemon no banco - ligue o banco e adiciona todos os dados 
+        #de maneira ordenada pelo id
         resultado = await db.execute(
             select(Pokemon).order_by(id).limit(limit).offset(offset)
         )
-        pokemons = resultado.scalarars().all()
+        pokemons = resultado.scalarars().all() # essa resposta será armazenada em pokemons
     
-        dados = [estrutura_no_banco[p] for p in pokemons]
+        dados = [estrutura_no_banco[p] for p in pokemons] #para cada resposta do banco/linha 
+        #será aplicado a função estrutura no banco - para apresentar os dados em json
     
-    else:
-        dados = []
-        async with httpx.AsyncClient() as client:
+    else: # caso não tenha no banco os dados
+        dados = [] 
+        async with httpx.AsyncClient() as client: # requisita a pokeapi os dados
+            
             response = await client.get(
-                f"{POKE_API_url}/pokemon",
+                f"{POKE_API_url}/pokemon", # poke api estrutura urlpokemon/pokemon/limit/offset
                 params={"limit": limit, "offset": offset}
             )
             response.raise_for_status()
             resultados = response.json()["results"]
-            total = response.json()["count"]
+            total = response.json()["count"] # pegando o total que ja ta armazenado na api
+            # na chave count
 
-            for item in resultados:
-                detalhe = await client.get(item["url"])
+            for item in resultados: # colocando o json em uma lista 
+                detalhe = await client.get(item["url"]) # acesso a chave url
                 detalhe.raise_for_status()
-                pokemon_formatado = estrutura_dados_daAPI(detalhe.json())
-                await salvar_no_banco(db, pokemon_formatado)
-                dados.append(pokemon_formatado)
+                pokemon_formatado = estrutura_dados_daAPI(detalhe.json()) # aplico a função
+                #o item url
+                await salvar_no_banco(db, pokemon_formatado) # salvo no banco
+                dados.append(pokemon_formatado) # adiciono ele formatado ao dados - para apresentar
+                #na resposta ao usuário
 
     resposta = {
         "data": dados,
@@ -167,7 +173,8 @@ async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str)
                     if offset > 0 else None,
     }
 
-    await set_cache(cache_key, resposta)
+    await set_cache(cache_key, resposta) #adiciono o que foi feito seja banco-ou apipoke ao redis
+    #no cache
     return resposta
         
     
@@ -182,6 +189,6 @@ async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str)
 # Verifica Redis -> Verifica Banco -> Verifica API 
 # Requisita API -> Adiciona Ao Banco -> Adiciona Ao Redis
 
-# a tarefa do professor pede nome, type, height, weight, sprit_image_front, sprit_image_back
+# quero somente nome, type, height, weight, sprit_image_front, sprit_image_back contidos na pokeapi
 # na requisição é só esses dados que se deve buscar na api do pokerapi 
 

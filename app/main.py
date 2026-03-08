@@ -19,6 +19,6 @@ app = FastAPI(
     lifespan=lifespan, 
 )
 
-from app.router import routes_pokemon # importando os endpoints de pokemon
+from app.router import pokemon # importando os endpoints de pokemon
 
-app.include_router(routes_pokemon.router, prefix="/api/v1") # incluindo os endpoints de pokemon na app
+app.include_router(pokemon.router, prefix="/api/v1") # incluindo os endpoints de pokemon na app
