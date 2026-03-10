@@ -8,7 +8,7 @@ load_dotenv()
 REDIS_URL = os.getenv('REDIS_URL')
 CACHE_TTL = 3600
 
-redis_client = redis.from_url(REDIS_URL, decode_response=True)
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 
 # funções para pegar os dados do cache redis
@@ -43,12 +43,10 @@ async def delete_cache(key: str):
 
 async def check_connection():
     try:
-        redis_client.ping()
+        await redis_client.ping()  # ✅
         return True
-    except:
+    except Exception:
         return False
-    
-
 
 
 '''

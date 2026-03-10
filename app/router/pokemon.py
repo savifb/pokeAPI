@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.services.pokemon import get_pokemon, get_pokemons
+from app.services.pokemon import get_pokemon_id, get_pokemons
 from app.schemas.pokemon import PokemonSchema, pokemonListReponse 
 router = APIRouter()
 
@@ -36,7 +36,7 @@ async def get_pokemon(
     pokemon_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    pokemon = await get_pokemon(db=db, pokemon_id=pokemon_id)
+    pokemon = await get_pokemon_id(db=db, pokemon_id=pokemon_id)
 
     if not pokemon:
         raise HTTPException(

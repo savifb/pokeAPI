@@ -1,24 +1,59 @@
-# baixando as importações necessárias ao fastapi 
-from fastapi import FastAPI # inicializa app
+# app/main.py
+
 from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # roda quando a api inicia 
-    print('conenctando ao banco de dados')
-    # Shurdown - roda quando a api é desligada
-    yield 
-    print('encerrando conexão')
-    
+    print("🚀 Iniciando aplicação...")
+
+    # conecta ao banco e cria as tabelas
+    from app.database import create_tables
+    await create_tables()
+    print("✅ Banco conectado")
+
+    # testa o Redis
+    from app.redis_client import check_connection
+    redis_ok = await check_connection()
+    if redis_ok:
+        print("✅ Redis conectado")
+    else:
+        print("⚠️  Redis não disponível")
+
+    yield
+
+    print("🛑 Encerrando aplicação...")
+
+
 app = FastAPI(
     title="Pokémon API",
-    description="...",
+    description="API que consome a PokéAPI e serve dados com cache.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan, 
+    lifespan=lifespan,
 )
 
-from app.router import pokemon # importando os endpoints de pokemon
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-app.include_router(pokemon.router, prefix="/api/v1") # incluindo os endpoints de pokemon na app
+# importa e registra o router
+from app.router import pokemon as pokemon_router
+
+app.include_router(
+    pokemon_router.router,
+    prefix="/api/v1",
+    tags=["Pokémons"]
+)
+
+
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Verifica se a API está no ar."""
+    return {"status": "ok", "version": "1.0.0"}

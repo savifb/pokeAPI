@@ -1,80 +1,64 @@
-import httpx # fazer requisição para api do pokeapi
-
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func 
+from sqlalchemy import select, func
 from app.models.pokemon import Pokemon
 from app.schemas.pokemon import spriteSchema, pokemonListReponse, PokemonSchema
 from app.redis_client import get_cache, set_cache, delete_cache, check_connection
-
-
-import os 
+import os
 from dotenv import load_dotenv
 
-POKE_API_url = 'https://pokeapi.co/api/v2/'
+POKE_API_url = 'https://pokeapi.co/api/v2'
 
-'''---------------------------------- FORMATAR DADOS PARA API -------------------------------------------'''
-
-def estrutura_dados_daAPI(dados: dict) -> dict:# recebe os dados da api
+def estrutura_dados_daAPI(dados: dict) -> dict:
     return {
         "id": dados["id"],
-        "name":dados["name"],
+        "name": dados["name"],
         "height": dados["height"],
         "weight": dados["weight"],
-        
         "types": [t["type"]["name"] for t in dados["types"]],
         "sprites": {
             "front_default": dados["sprites"]["front_default"],
             "back_default": dados["sprites"]["back_default"],
         }
     }
-'''----------------FORMATA PARA O BANCO RECEBER O OBJETO E O REDIS O JSON ----------------------'''
-# função receberá um objeto do tipo pokemon (model.pokemon)
-# e retornará um json/dicionário python para alocar no redis
+
 def estrutura_no_banco(pokemon: Pokemon):
-    
     return {
         "id": pokemon.id,
         "name": pokemon.name,
-        "heigth": pokemon.height,
+        "height": pokemon.height,
         "weight": pokemon.weight,
-        "types" : pokemon.types,
+        "types": pokemon.types,
         "sprites": {
-            "front_default":pokemon.sprite_front,
+            "front_default": pokemon.sprite_front,
             "back_default": pokemon.sprite_back
         }
     }
-'''---------------------------------- BUSCA NA API -------------------------------------------'''
-# requisição a PokeAPI 
-async def buscar_na_PokeAPI(pokemon_id:int) -> dict | None:
-    #async with httpx.AsyncClient() - > abre conexão com htpp e
-    # fecha automaticamente mesmo se der erro
-    # de maneira assíncrona
+
+async def buscar_na_PokeAPI(pokemon_id: int) -> dict | None:
     async with httpx.AsyncClient() as client:
         response = await client.get(f"{POKE_API_url}/pokemon/{pokemon_id}")
 
     if response.status_code == 404:
-        return {"message" : "pokemon não encontrado"}
-    
-    response.raise_for_status() # qualquer outro erro 
-    
+        return None
+
+    response.raise_for_status()
     return estrutura_dados_daAPI(response.json())
 
-
-'''-----------------------------------SALVAR NO BANCO DE DADOS---------------------------------'''
-async def salvar_no_banco(db:AsyncSession, dados:dict) -> Pokemon:
+async def salvar_no_banco(db: AsyncSession, dados: dict) -> Pokemon:
     resultado = await db.execute(
-        select(Pokemon).where(Pokemon.id==dados['id']) # resultado receberá o objeto do pokemon.id
+        select(Pokemon).where(Pokemon.id == dados['id'])
     )
-    pokemon = resultado.scalar_one_or_none() # retorna o pokemon ou none 
-    if pokemon: # se existe no banco - então só atualiza os dados 
-        pokemon.name = dados['name']
-        pokemon.heigth = dados["heigth"]
-        pokemon.weigth = dados["weight"]
-        pokemon.types = dados["dados"]
-        pokemon.sprites_front = dados["sprites"]["front_default"]
-        pokemon.spretes_back = dados["sprites"]["back_default"]
+    pokemon = resultado.scalar_one_or_none()
+
+    if pokemon:
+        pokemon.name = dados["name"]
+        pokemon.height = dados["height"]
+        pokemon.weight = dados["weight"]
+        pokemon.types = dados["types"]
+        pokemon.sprite_front = dados["sprites"]["front_default"]
+        pokemon.sprite_back = dados["sprites"]["back_default"]
     else:
-        # caso não exista no banco vai ser criado
         pokemon = Pokemon(
             id=dados["id"],
             name=dados["name"],
@@ -84,83 +68,70 @@ async def salvar_no_banco(db:AsyncSession, dados:dict) -> Pokemon:
             sprite_front=dados["sprites"]["front_default"],
             sprite_back=dados["sprites"]["back_default"],
         )
-        db.add(pokemon) 
-        
-        await db.commit()
-        await db.refresh()
-        
-        return pokemon
+        db.add(pokemon)
 
-'''--------------------BUSCA POKEMON INDIVIDUAL--------------------------'''
-async def get_pokemon(db:AsyncSession, pokemon_id:int) -> dict|None:
-    #funcção que vai buscar o pokemon pelo id - passando pelo redis->banco->PokeAPi
-    '''Primeiro averigua se tem no cache o dado'''
-    cache = get_cache(pokemon_id) 
+    await db.commit()
+    await db.refresh(pokemon)
+    return pokemon
+
+async def get_pokemon_id(db: AsyncSession, pokemon_id: int) -> dict | None:
+    cache = await get_cache(f"Pokemon:{pokemon_id}")
     if cache:
         return cache
-    
-    '''Averigua então se tem no banco'''
-    resultado = await db.execute(select(Pokemon).where(Pokemon.id==pokemon.id))
-    
+
+    resultado = await db.execute(select(Pokemon).where(Pokemon.id == pokemon_id))
     pokemon = resultado.scalar_one_or_none()
-    #se tiver no banco então adiciona no cache
+
     if pokemon:
-        dados = estrutura_dados_daAPI(pokemon)
-        await set_cache(f"{pokemon_id}", dados)
+        dados = estrutura_no_banco(pokemon)
+        await set_cache(f"Pokemon:{pokemon_id}", dados)
         return dados
-    '''vamos para api então'''
-    #requisição da api
+
     dados = await buscar_na_PokeAPI(pokemon_id)
-    
+
     if dados is None:
-        return None # dado não existe em lugar nenhum
+        return None
 
     await salvar_no_banco(db, dados)
     await set_cache(f'Pokemon:{pokemon_id}', dados)
-    
-    return dados 
+    return dados
 
 async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str) -> dict:
-    cache_key = f"pokemons: {limit}:{offset}"
-    
-    cache = await get_cache(cache_key) #pegar o cache cm base no limite por página e posição
-    
+    cache_key = f"pokemons:{limit}:{offset}"
+
+    cache = await get_cache(cache_key)
     if cache:
         return cache
-    
-    total = await db.scalar(func.count()).select_from(Pokemon)
-    
-    if total > 0: # se tiver pokemon no banco - ligue o banco e adiciona todos os dados 
-        #de maneira ordenada pelo id
+
+    # ✅ Bug 1 corrigido — query montada antes do await
+    total = await db.scalar(select(func.count()).select_from(Pokemon))
+
+    if total > 0:
         resultado = await db.execute(
-            select(Pokemon).order_by(id).limit(limit).offset(offset)
+            # ✅ Bug 6 corrigido — Pokemon.id em vez de id
+            select(Pokemon).order_by(Pokemon.id).limit(limit).offset(offset)
         )
-        pokemons = resultado.scalarars().all() # essa resposta será armazenada em pokemons
-    
-        dados = [estrutura_no_banco[p] for p in pokemons] #para cada resposta do banco/linha 
-        #será aplicado a função estrutura no banco - para apresentar os dados em json
-    
-    else: # caso não tenha no banco os dados
-        dados = [] 
-        async with httpx.AsyncClient() as client: # requisita a pokeapi os dados
-            
+        # ✅ Bug 5 corrigido — scalars() e chamada de função
+        pokemons = resultado.scalars().all()
+        dados = [estrutura_no_banco(p) for p in pokemons]
+
+    else:
+        dados = []
+        async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{POKE_API_url}/pokemon", # poke api estrutura urlpokemon/pokemon/limit/offset
+                f"{POKE_API_url}/pokemon",
                 params={"limit": limit, "offset": offset}
             )
             response.raise_for_status()
             resultados = response.json()["results"]
-            total = response.json()["count"] # pegando o total que ja ta armazenado na api
-            # na chave count
+            total = response.json()["count"]
 
-            for item in resultados: # colocando o json em uma lista 
-                detalhe = await client.get(item["url"]) # acesso a chave url
+            for item in resultados:
+                detalhe = await client.get(item["url"])
                 detalhe.raise_for_status()
-                pokemon_formatado = estrutura_dados_daAPI(detalhe.json()) # aplico a função
-                #o item url
-                await salvar_no_banco(db, pokemon_formatado) # salvo no banco
-                dados.append(pokemon_formatado) # adiciono ele formatado ao dados - para apresentar
-                #na resposta ao usuário
+                pokemon_formatado = estrutura_dados_daAPI(detalhe.json())
+                await salvar_no_banco(db, pokemon_formatado)
+                dados.append(pokemon_formatado)
 
     resposta = {
         "data": dados,
@@ -173,22 +144,5 @@ async def get_pokemons(db: AsyncSession, limit: int, offset: int, base_url: str)
                     if offset > 0 else None,
     }
 
-    await set_cache(cache_key, resposta) #adiciono o que foi feito seja banco-ou apipoke ao redis
-    #no cache
+    await set_cache(cache_key, resposta)
     return resposta
-        
-    
-
-
-'''
-1) Verifica POKEMON redis/banco
-2) Envia a requisição caso não tenha no redis e nem no banco 
-3) Adiciona no banco o pokemon e no redis
-'''
-
-# Verifica Redis -> Verifica Banco -> Verifica API 
-# Requisita API -> Adiciona Ao Banco -> Adiciona Ao Redis
-
-# quero somente nome, type, height, weight, sprit_image_front, sprit_image_back contidos na pokeapi
-# na requisição é só esses dados que se deve buscar na api do pokerapi 
-

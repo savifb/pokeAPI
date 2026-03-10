@@ -16,7 +16,7 @@ class Pokemon(Base):
     types: Mapped[list] = mapped_column(ARRAY(String), nullable=False)
     sprite_front: Mapped[str|None] = mapped_column(String, nullable=True)
     sprite_back: Mapped[str|None] = mapped_column(String, nullable=True)
-    tempo_cache: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+    tempo_cache: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 def __repr__(self):# quando fazer o print - ele fica legível - mostrando id e o nome do pokemon
