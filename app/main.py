@@ -26,16 +26,30 @@ async def lifespan(app: FastAPI):
 
     print("🛑 Encerrando aplicação...")
 
-
 app = FastAPI(
     title="Pokémon API",
-    description="API que consome a PokéAPI e serve dados com cache.",
+    description="""
+## API de Pokémons 🎮
+
+API REST que consome dados da [PokéAPI](https://pokeapi.co) e os disponibiliza 
+de forma paginada com cache local.
+
+### Funcionalidades
+- 📋 **Listagem paginada** de pokémons
+- 🔍 **Busca por ID** de pokémon individual
+- ⚡ **Cache Redis** para respostas rápidas
+- 🗄️ **Banco PostgreSQL** para persistência local
+
+### Fluxo de cache
+```
+Redis → PostgreSQL → PokéAPI
+```
+    """,
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
